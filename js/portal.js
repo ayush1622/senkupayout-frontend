@@ -13,10 +13,10 @@ let currentDepositRequest = null;
 
 const NAV = {
   ADMIN: [
-    ['home','⌂','Home'],['agents','A','Agents'],['users','U','Users'],['transactions','↻','Transactions'],['methods','◇','Payment Methods'],['support','◎','Support'],['security','◈','Security'],['audit','≡','Audit Log']
+    ['home','⌂','Home'],['agents','A','Agents'],['users','U','Users'],['payouts','⇧','Payout Requests'],['transactions','↻','Transactions'],['methods','◇','Payment Methods'],['support','◎','Support'],['security','◈','Security'],['audit','≡','Audit Log']
   ],
   AGENT: [
-    ['home','⌂','Home'],['deposit','+','Deposit'],['transactions','↻','Transactions'],['users','U','Users'],['support','◎','Support'],['security','◈','Security']
+    ['home','⌂','Home'],['deposit','+','Deposit'],['withdraw','⇧','USDT Withdrawal'],['cashout','↗','Player Cashout'],['transactions','↻','Transactions'],['users','U','Users'],['support','◎','Support'],['security','◈','Security']
   ],
   USER: [
     ['home','⌂','Home'],['deposit','+','Deposit'],['transactions','↻','Transactions'],['employees','E','Employees'],['support','◎','Support'],['security','◈','Security']
@@ -94,7 +94,7 @@ async function renderHome(){
   if(me.role==='ADMIN')return renderAdminHome();
   const d=await api('/api/finance/dashboard');
   content.innerHTML=`${pageHead(`Good ${new Date().getHours()<12?'morning':new Date().getHours()<18?'afternoon':'evening'}, ${me.displayName||me.username}`,'Your SenkuPayout overview.')}
-  <div class="balance-grid"><section class="blue-hero"><div class="tiny" style="opacity:.8;font-weight:800">AVAILABLE BALANCE</div><div class="amount-large">${moneyFmt(d.wallet.available)}</div><div class="quick-actions">${(NAV[me.role]||[]).filter(x=>['deposit','transactions'].includes(x[0])).map(([v,i,l])=>`<button class="quick" data-go="${v}"><div style="font-size:20px">${i}</div><strong>${l}</strong></button>`).join('')}</div></section><div class="stat-stack"><div class="card stat-card"><div class="stat-label">Pending</div><div class="stat-value">${d.pendingCount}</div></div><div class="card stat-card"><div class="stat-label">This month</div><div class="stat-value">${moneyFmt(d.thisMonth)}</div></div></div></div>
+  <div class="balance-grid"><section class="blue-hero"><div class="tiny" style="opacity:.8;font-weight:800">AVAILABLE BALANCE</div><div class="amount-large">${moneyFmt(d.wallet.available)}</div><div class="quick-actions">${(NAV[me.role]||[]).filter(x=>['deposit','withdraw','cashout','transactions'].includes(x[0])).map(([v,i,l])=>`<button class="quick" data-go="${v}"><div style="font-size:20px">${i}</div><strong>${l}</strong></button>`).join('')}</div></section><div class="stat-stack"><div class="card stat-card"><div class="stat-label">Pending</div><div class="stat-value">${d.pendingCount}</div></div><div class="card stat-card"><div class="stat-label">This month</div><div class="stat-value">${moneyFmt(d.thisMonth)}</div></div></div></div>
   <section class="card card-pad" style="margin-top:18px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div><div class="section-title">Recent activity</div><div class="small muted">Latest balance activity</div></div><button class="btn btn-outline btn-sm" data-go="transactions">See all →</button></div>${txTable(d.recent)}</section>`;
   content.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>location.hash=b.dataset.go);
 }
@@ -207,18 +207,78 @@ async function renderDeposit(){
   }
 }
 
+// Only AGENT accounts have these views; the backend enforces that too.
+function agentPayoutRows(rows) {
+  if (!rows.length) return '<div class="notice">No payout requests yet.</div>';
+  return `<div class="table-wrap"><table><thead><tr><th>Requested</th><th>Type</th><th>Receive</th><th>Fee</th><th>Total Held</th><th>Method</th><th>Status</th><th>Reference</th></tr></thead><tbody>${rows.map(t=>`<tr><td>${escapeHtml(dateFmt(t.createdAt))}</td><td>${escapeHtml(t.type)}</td><td>${moneyFmt(t.net)}</td><td>${moneyFmt(t.fee)}</td><td>${moneyFmt(t.amount)}</td><td>${escapeHtml(t.method)}</td><td>${statusPill(t.status)}</td><td class="tiny">${escapeHtml(t.reference)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function usd(n){return moneyFmt(n)}
+function payoutSummary(amount, fee){return `Amount to receive: <strong>${usd(amount)}</strong> · Fee: <strong>${usd(fee)}</strong> · Total held: <strong>${usd(amount+fee)}</strong>`}
 async function renderWithdraw(){
-  const w=await api('/api/finance/wallet');
-  content.innerHTML=`${pageHead('Withdraw','Move your available balance to a crypto wallet or bank destination.')}
-  <section class="soft-hero"><div class="grid2" style="align-items:center"><div><div class="tiny muted" style="font-weight:900">AVAILABLE</div><div class="amount-large" style="color:var(--blue)">${moneyFmt(w.wallet.available)}</div></div><div><div class="tiny muted">WITHDRAWAL</div><h2>Move funds to your destination</h2><p class="small muted">Requests are held from your balance until admin approval or rejection.</p></div></div></section><section class="card card-pad" style="margin-top:16px"><form id="withdrawForm" class="grid2"><label class="field"><span class="label">Amount (USD)</span><input id="wdAmount" class="input" type="number" min="10" step="0.01" required></label><label class="field"><span class="label">Wallet / bank destination</span><input id="wdDest" class="input" placeholder="Wallet address or payout destination" required></label><div style="grid-column:1/-1"><button class="btn btn-primary">Create withdrawal</button></div></form></section>`;
-  withdrawForm.onsubmit=async e=>{e.preventDefault();try{await api('/api/finance/withdrawals',{method:'POST',body:{amount:Number(wdAmount.value),destination:wdDest.value}});toast('Withdrawal request created.');renderWithdraw()}catch(err){toast(err.message,true)}};
+  const [w,policy,history]=await Promise.all([api('/api/finance/wallet'),api('/api/finance/payout-options'),api('/api/finance/transactions?type=WITHDRAWAL')]);
+  let requestKey=crypto.randomUUID();
+  const networkEntries=Object.entries(policy.networks);
+  content.innerHTML=`${pageHead('USDT withdrawal','Agent-only withdrawal requests — processed manually by SenkuPayout admin.')}
+  <section class="soft-hero"><div class="grid2"><div><div class="tiny muted">AVAILABLE BALANCE</div><div class="amount-large" style="color:var(--blue)">${moneyFmt(w.wallet.available)}</div><div class="small muted">Funds on hold: ${moneyFmt(w.wallet.pending)}</div></div><div><div class="tiny muted">MANUAL WITHDRAWAL</div><h2>Withdraw USDT</h2><p class="small muted">Minimum $${policy.withdrawalMin}. Requests are reviewed manually. This is NOT an automatic BytePayout withdrawal.</p></div></div></section>
+  <section class="card card-pad" style="margin-top:16px"><form id="withdrawForm" class="stack">
+    <div class="grid2"><label class="field"><span class="label">Amount to receive (USD equivalent)</span><input id="wdAmount" class="input" type="number" min="${policy.withdrawalMin}" max="10000" step="0.01" placeholder="50.00" required></label>
+      <label class="field"><span class="label">USDT network</span><select id="wdNetwork" class="select">${networkEntries.map(([code,v])=>`<option value="${escapeHtml(code)}">${escapeHtml(v.label)} — ${moneyFmt(v.fee)} fee</option>`).join('')}</select></label></div>
+    <label class="field"><span class="label">Receiving USDT wallet address</span><input id="wdDest" class="input" maxlength="120" autocomplete="off" placeholder="0x... (BEP-20/ERC-20)" required></label>
+    <div id="wdQuote" class="notice">Enter an amount to calculate the total hold.</div>
+    <div class="notice"><strong>Manual processing:</strong> Submit a request, receive a reference, and await admin review. Funds are held from your SenkuPayout wallet. Request details, including the public receiving address, go to the admin dashboard and private Telegram admin chat. No cryptocurrency is sent automatically. Never share a private key or seed phrase.</div>
+    <button class="btn btn-primary" id="wdSubmit">Request USDT withdrawal</button>
+  </form></section><section class="card card-pad" style="margin-top:16px"><div class="section-title" style="margin-bottom:14px">Withdrawal requests</div>${agentPayoutRows(history.transactions)}</section>`;
+  const form=document.getElementById('withdrawForm'), q=document.getElementById('wdQuote');
+  function updateQuote(){const amount=Number(wdAmount.value),network=policy.networks[wdNetwork.value];
+    q.innerHTML=amount>0&&network?payoutSummary(amount,network.fee):'Enter an amount to calculate the total hold.';
+    wdDest.placeholder=wdNetwork.value==='TRC20'?'T... (Tron TRC-20 address)':'0x... (40 hexadecimal characters)';
+  }
+  wdAmount.addEventListener('input',updateQuote);wdNetwork.addEventListener('change',updateQuote);updateQuote();
+  form.onsubmit=async e=>{e.preventDefault();wdSubmit.disabled=true;try{
+    const result=await api('/api/finance/withdrawals',{method:'POST',body:{amount:Number(wdAmount.value),network:wdNetwork.value,destination:wdDest.value.trim(),requestKey}});
+    const notification=result.notification?.sent?'Telegram notification sent.':'Telegram alert not delivered — admin can still see and retry this request.';
+    toast('Withdrawal request saved. '+notification);
+    openModal(`<h3>Withdrawal request received</h3><p>Status: <strong>Awaiting manual processing</strong></p><p>Reference: <strong>${escapeHtml(result.transaction.reference)}</strong></p><p>Receive: ${moneyFmt(result.transaction.net)} · Held: ${moneyFmt(result.transaction.amount)}</p><p class="small muted">${escapeHtml(notification)}</p><button class="btn btn-primary" onclick="closeModal()">Close</button>`);
+    requestKey=crypto.randomUUID();
+    const [w2,h2]=await Promise.all([api('/api/finance/wallet'),api('/api/finance/transactions?type=WITHDRAWAL')]);
+    const box=form.closest('.card');box.nextElementSibling.innerHTML=`<div class="section-title" style="margin-bottom:14px">Withdrawal requests</div>${agentPayoutRows(h2.transactions)}`;
+    const hero=content.querySelector('.soft-hero');hero.querySelector('.amount-large').textContent=moneyFmt(w2.wallet.available);
+    hero.querySelector('.small.muted').textContent='Funds on hold: '+moneyFmt(w2.wallet.pending); form.reset();updateQuote();
+  }catch(err){toast(err.message,true)}finally{wdSubmit.disabled=false}};
 }
 
 async function renderCashout(){
-  const w=await api('/api/finance/wallet');
-  content.innerHTML=`${pageHead('Player cashout','Send funds to a player destination from your balance.')}
-  <section class="soft-hero"><div class="grid2"><div><div class="tiny muted">BALANCE</div><div class="amount-large" style="color:var(--blue)">${moneyFmt(w.wallet.available)}</div></div><div><div class="tiny muted">PLAYER CASHOUT</div><h2>Pay players in seconds</h2><p class="small muted">$1.00 flat platform fee · $30 minimum · Chime or PayPal in this starter configuration.</p></div></div></section><section class="card card-pad" style="margin-top:16px"><form id="cashoutForm" class="grid3"><label class="field"><span class="label">Amount</span><input id="coAmount" class="input" type="number" min="30" step="0.01" required></label><label class="field"><span class="label">Method</span><select id="coMethod" class="select"><option value="chime">Chime</option><option value="paypal">PayPal</option></select></label><label class="field"><span class="label">Player tag / destination</span><input id="coDest" class="input" required></label><div style="grid-column:1/-1"><button class="btn btn-primary">New cashout</button></div></form></section>`;
-  cashoutForm.onsubmit=async e=>{e.preventDefault();try{await api('/api/finance/cashouts',{method:'POST',body:{amount:Number(coAmount.value),method:coMethod.value,destination:coDest.value}});toast('Cashout request created.');renderCashout()}catch(err){toast(err.message,true)}};
+  const [w,policy,history]=await Promise.all([api('/api/finance/wallet'),api('/api/finance/payout-options'),api('/api/finance/transactions?type=CASHOUT')]);
+  let requestKey=crypto.randomUUID();
+  const methods=Object.entries(policy.cashoutMethods);
+  content.innerHTML=`${pageHead('Player cashout','Agent-only player cashout requests — manually handled by SenkuPayout admin.')}
+  <section class="soft-hero"><div class="grid2"><div><div class="tiny muted">AVAILABLE BALANCE</div><div class="amount-large" style="color:var(--blue)">${moneyFmt(w.wallet.available)}</div><div class="small muted">Funds on hold: ${moneyFmt(w.wallet.pending)}</div></div><div><div class="tiny muted">PLAYER CASHOUT</div><h2>Request player payment</h2><p class="small muted">Minimum $${policy.cashoutMin}. Chime, Cash App, PayPal and Venmo. Admin will send funds manually.</p></div></div></section>
+  <section class="card card-pad" style="margin-top:16px"><form id="cashoutForm" class="stack">
+    <div class="grid2"><label class="field"><span class="label">Amount player should receive (USD)</span><input id="coAmount" class="input" type="number" min="${policy.cashoutMin}" max="10000" step="0.01" placeholder="30.00" required></label>
+    <label class="field"><span class="label">Payment platform</span><select id="coMethod" class="select">${methods.map(([code,v])=>`<option value="${escapeHtml(code)}">${escapeHtml(v.label)} — ${v.flatFee?usd(v.flatFee)+' flat fee':v.ratePercent+'% fee'}</option>`).join('')}</select></label></div>
+    <label class="field"><span class="label" id="coDestLabel">Player tag / username</span><input id="coDest" class="input" maxlength="180" autocomplete="off" placeholder="Recipient tag or handle" required></label>
+    <div id="coQuote" class="notice">Enter an amount to calculate the total hold.</div>
+    <div class="notice"><strong>Manual processing:</strong> We forward the information you enter to the admin dashboard and a private Telegram admin chat. No cashout is sent through BytePayout's API. Double-check the recipient details.</div>
+    <button class="btn btn-primary" id="coSubmit">Request player cashout</button>
+  </form></section><section class="card card-pad" style="margin-top:16px"><div class="section-title" style="margin-bottom:14px">Cashout requests</div>${agentPayoutRows(history.transactions)}</section>`;
+  const form=document.getElementById('cashoutForm'),q=document.getElementById('coQuote');
+  function updateQuote(){const amount=Number(coAmount.value),method=policy.cashoutMethods[coMethod.value];
+    const fee=method ? Math.round((method.flatFee+amount*method.ratePercent/100)*100)/100:0;
+    q.innerHTML=amount>0&&method?payoutSummary(amount,fee):'Enter an amount to calculate the total hold.';
+    const paypal=coMethod.value==='paypal';document.getElementById('coDestLabel').textContent=paypal?'Player PayPal email':'Player tag / username';coDest.placeholder=paypal?'player@example.com':'Recipient tag / handle';
+  }
+  coAmount.addEventListener('input',updateQuote);coMethod.addEventListener('change',updateQuote);updateQuote();
+  form.onsubmit=async e=>{e.preventDefault();coSubmit.disabled=true;try{
+    const result=await api('/api/finance/cashouts',{method:'POST',body:{amount:Number(coAmount.value),method:coMethod.value,destination:coDest.value.trim(),requestKey}});
+    const notification=result.notification?.sent?'Telegram notification sent.':'Telegram alert not delivered — admin can still see and retry this request.';
+    toast('Player cashout request saved. '+notification);
+    openModal(`<h3>Cashout request received</h3><p>Status: <strong>Awaiting manual processing</strong></p><p>Reference: <strong>${escapeHtml(result.transaction.reference)}</strong></p><p>Player receives: ${moneyFmt(result.transaction.net)} · Held: ${moneyFmt(result.transaction.amount)}</p><p class="small muted">${escapeHtml(notification)}</p><button class="btn btn-primary" onclick="closeModal()">Close</button>`);
+    requestKey=crypto.randomUUID();
+    const [w2,h2]=await Promise.all([api('/api/finance/wallet'),api('/api/finance/transactions?type=CASHOUT')]);
+    const box=form.closest('.card');box.nextElementSibling.innerHTML=`<div class="section-title" style="margin-bottom:14px">Cashout requests</div>${agentPayoutRows(h2.transactions)}`;
+    const hero=content.querySelector('.soft-hero');hero.querySelector('.amount-large').textContent=moneyFmt(w2.wallet.available);
+    hero.querySelector('.small.muted').textContent='Funds on hold: '+moneyFmt(w2.wallet.pending);form.reset();updateQuote();
+  }catch(err){toast(err.message,true)}finally{coSubmit.disabled=false}};
 }
 
 async function renderRecharge(){
@@ -317,11 +377,36 @@ async function renderEmployees(){
 }
 
 async function renderPayouts(){
-  const d=await api('/api/finance/admin/transactions');const rows=d.transactions.filter(t=>['WITHDRAWAL','CASHOUT'].includes(t.type));
-  content.innerHTML=`${pageHead('Payouts','Approve or reject pending withdrawals and player cashouts.')}<section class="card card-pad">${rows.length?`<div class="table-wrap"><table><thead><tr><th>Account</th><th>Type</th><th>Amount</th><th>Net payout</th><th>Destination</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>${rows.map(t=>`<tr><td>${escapeHtml(t.owner?.username||'')}</td><td>${t.type}</td><td>${moneyFmt(t.amount)}</td><td>${moneyFmt(t.net)}</td><td>${escapeHtml(t.destination||'—')}</td><td>${statusPill(t.status)}</td><td>${escapeHtml(dateFmt(t.createdAt))}</td><td>${t.status==='PENDING'?`<div class="row-actions"><button class="btn btn-good btn-sm" data-approve="${t.id}">Approve</button><button class="btn btn-danger btn-sm" data-reject="${t.id}">Reject</button></div>`:'—'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="notice">No payout records.</div>'}</section>`;
-  content.querySelectorAll('[data-approve]').forEach(b=>b.onclick=()=>payoutAction(b.dataset.approve,'approve'));content.querySelectorAll('[data-reject]').forEach(b=>b.onclick=()=>payoutAction(b.dataset.reject,'reject'));
+  const d=await api('/api/finance/admin/transactions');
+  const rows=d.transactions.filter(t=>['WITHDRAWAL','CASHOUT'].includes(t.type));
+  const pending=rows.filter(t=>t.status==='PENDING').length;
+  content.innerHTML=`${pageHead('Payout requests','Review agent-only requests and process them manually in BytePayout or your payment account.')}
+  <section class="soft-hero" style="margin-bottom:16px"><div class="tiny muted">PENDING MANUAL PAYOUTS</div><h2>${pending} request(s) awaiting action</h2><p class="small muted">First complete the real transfer, then enter its external transaction reference and Mark Paid. Reject refunds all held funds.</p><button type="button" id="testTgBtn" class="btn btn-outline btn-sm">Send test Telegram alert</button></section>
+  <section class="card card-pad">${rows.length?`<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Type</th><th>Receive</th><th>Fee</th><th>Total Held</th><th>Method</th><th>Destination</th><th>Status</th><th>Telegram</th><th>Reference</th><th>Actions</th></tr></thead><tbody>${rows.map(t=>`<tr><td>${escapeHtml(t.owner?.username||'')}</td><td>${escapeHtml(t.type)}</td><td>${moneyFmt(t.net)}</td><td>${moneyFmt(t.fee)}</td><td>${moneyFmt(t.amount)}</td><td>${escapeHtml(t.method||'—')}</td><td style="max-width:190px;overflow-wrap:anywhere">${escapeHtml(t.destination||'—')}</td><td>${statusPill(t.status)}</td><td>${t.payoutAlert?.sentAt?'<span class="pill good">Sent</span>':'<span class="pill warn">Unsent</span>'}</td><td class="tiny">${escapeHtml(t.reference)}</td><td>${t.status==='PENDING'?`<div class="row-actions"><button class="btn btn-good btn-sm" data-paid="${escapeHtml(t.id)}">Mark Paid</button><button class="btn btn-danger btn-sm" data-reject="${escapeHtml(t.id)}">Reject</button>${!t.payoutAlert?.sentAt?`<button class="btn btn-outline btn-sm" data-notify="${escapeHtml(t.id)}">Retry alert</button>`:''}</div>`:'—'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="notice">No agent payout requests yet.</div>'}</section>`;
+  document.getElementById('testTgBtn').onclick=async()=>{try{await api('/api/finance/admin/telegram/test',{method:'POST'});toast('Test message sent to Telegram.')}catch(err){toast(err.message,true)}};
+  content.querySelectorAll('[data-paid]').forEach(b=>b.onclick=()=>payoutAction(b.dataset.paid,'approve'));
+  content.querySelectorAll('[data-reject]').forEach(b=>b.onclick=()=>payoutAction(b.dataset.reject,'reject'));
+  content.querySelectorAll('[data-notify]').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;try{const result=await api(`/api/finance/admin/payouts/${b.dataset.notify}/notify`,{method:'POST'});
+      if(!result.notification.sent)throw new Error(result.notification.error||'Telegram alert failed');toast('Telegram notification sent.');renderPayouts();
+    }catch(e){toast(e.message,true)}finally{b.disabled=false}
+  });
 }
-async function payoutAction(id,action){try{await api(`/api/finance/admin/payouts/${id}/${action}`,{method:'POST'});toast(`Payout ${action}d.`);renderPayouts()}catch(err){toast(err.message,true)}}
+async function payoutAction(id,action){
+  const paid=action==='approve';
+  openModal(`<h3>${paid?'Mark request as PAID':'Reject payout request'}</h3>
+    <p class="small muted">${paid?'ONLY do this after manually sending the actual payment outside SenkuPayout. Mark Paid does not transfer money. The held wallet balance will then be settled.':'Rejecting releases all held funds back to the agent wallet.'}</p>
+    <form id="payoutDecisionForm" class="stack" style="margin-top:12px"><label class="field"><span class="label">${paid?'External payment reference / transfer confirmation':'Rejection reason'}</span>
+    <input name="${paid?'externalReference':'reason'}" class="input" required minlength="${paid?4:3}" maxlength="${paid?140:300}" placeholder="${paid?'Real transaction reference from payment provider':'Reason for rejecting the request'}"></label>
+    <div class="row-actions"><button type="button" id="cancelDecision" class="btn btn-outline">Cancel</button><button type="submit" id="submitDecision" class="btn ${paid?'btn-good':'btn-danger'}">${paid?'Confirm — money already sent':'Reject and refund hold'}</button></div></form>`);
+  document.getElementById('cancelDecision').onclick=closeModal;
+  document.getElementById('payoutDecisionForm').onsubmit=async e=>{
+    e.preventDefault();submitDecision.disabled=true;
+    try{await api(`/api/finance/admin/payouts/${id}/${action}`,{method:'POST',body:Object.fromEntries(new FormData(e.target).entries())});
+      toast(paid?'Marked paid after manual transfer.':'Request rejected and held funds returned.');closeModal();await renderPayouts();
+    }catch(err){toast(err.message,true);submitDecision.disabled=false}
+  };
+}
 
 async function renderMethods(){
   const d=await api('/api/finance/admin/payment-methods');
@@ -354,7 +439,7 @@ async function renderAudit(){const d=await api('/api/admin/audit');content.inner
 
 function renderGuide(){
   content.innerHTML=`${pageHead('Guide','SenkuPayout role and transaction workflow reference.')}
-  <div class="stack"><div class="guide-card"><h3>Account hierarchy</h3><div class="codebox">ADMIN\n├── AGENT\n│   ├── USER\n│   └── USER\n└── DIRECT USER\n    └── EMPLOYEE</div><p class="small muted">Only ADMIN can create AGENT accounts. AGENT can create USER accounts assigned to that agent and cannot view or manage those users’ balances. USER can create EMPLOYEE accounts. EMPLOYEE can create deposits for their parent user. Admin may view a User’s employees from the User Manage tab, but employee accounts are read-only for Admin. There is no public registration route.</p></div><div class="guide-card"><h3>Payment flow</h3><div class="codebox">Browser → SenkuPayout API → Provider adapter → Hosted checkout\nProvider confirmation/webhook → backend verification → transaction succeeds → wallet credit → optional agent commission</div></div><div class="guide-card"><h3>Gateway integration</h3><p class="small muted">BytePayout is integrated for real deposits. Configure BYTEPAYOUT_API_KEY and BYTEPAYOUT_WEBHOOK_SECRET on the backend, and verify deposit confirmations in the transaction screen. Payouts are disabled in this deposit-only deployment. The frontend continues calling only SenkuPayout.</p></div><div class="guide-card"><h3>No image assets</h3><p class="small muted">This project uses CSS, text and native browser UI only. There are no PNG/JPG/WebP image assets and no external font or icon package in the frontend.</p></div></div>`;
+  <div class="stack"><div class="guide-card"><h3>Account hierarchy</h3><div class="codebox">ADMIN\n├── AGENT\n│   ├── USER\n│   └── USER\n└── DIRECT USER\n    └── EMPLOYEE</div><p class="small muted">Only ADMIN can create AGENT accounts. AGENT can create USER accounts assigned to that agent and cannot view or manage those users’ balances. USER can create EMPLOYEE accounts. EMPLOYEE can create deposits for their parent user. Admin may view a User’s employees from the User Manage tab, but employee accounts are read-only for Admin. There is no public registration route.</p></div><div class="guide-card"><h3>Payment flow</h3><div class="codebox">Browser → SenkuPayout API → Provider adapter → Hosted checkout\nProvider confirmation/webhook → backend verification → transaction succeeds → wallet credit → optional agent commission</div></div><div class="guide-card"><h3>Gateway integration</h3><p class="small muted">BytePayout is integrated for real deposits. Configure BYTEPAYOUT_API_KEY and BYTEPAYOUT_WEBHOOK_SECRET on the backend, and verify deposit confirmations in the transaction screen. Only agents can request manual USDT withdrawals and player cashouts. The backend sends a Telegram alert and holds the funds until admin manually marks paid or rejects. Deposits continue through BytePayout's API. Telegram alerts do not transfer funds.</p></div><div class="guide-card"><h3>No image assets</h3><p class="small muted">This project uses CSS, text and native browser UI only. There are no PNG/JPG/WebP image assets and no external font or icon package in the frontend.</p></div></div>`;
 }
 
 async function renderCurrent(){
