@@ -18,8 +18,8 @@
    <div class="small muted" style="margin-top:12px">Checkout is handled by the payment provider. Payment is confirmed only after the provider verifies it.</div>
   </section></div>
   <aside class="public-side-col"><div class="card card-pad public-summary"><div class="label">LIVE SUMMARY</div><div class="public-summary-row"><span>You send</span><strong id="publicGross">$0.00</strong></div>
-   <div class="public-summary-row"><span>Recipient account fee</span><span id="publicFee">—</span></div>
-   <div class="public-summary-row total"><span>Recipient wallet receives</span><strong id="publicNet">$0.00</strong></div>
+   <div class="public-summary-row"><span id="publicFeeLabel">Account fee</span><span id="publicFee">—</span></div>
+   <div class="public-summary-row total"><span>Wallet credited after payment</span><strong id="publicNet">$0.00</strong></div>
    <p class="tiny muted">Fees displayed are deducted from the recipient's account credit. Your checkout amount is shown above.</p></div>
    <div class="card card-pad" style="margin-top:14px"><div class="label">HOW IT WORKS</div>
    <p class="small muted">1. Choose a method and amount.</p><p class="small muted">2. Open your generated checkout link.</p><p class="small muted">3. We verify the payment and update the recipient's account.</p></div></aside>
@@ -27,5 +27,5 @@
  <section id="publicTracking" class="hidden" aria-live="polite"></section>
  <p class="public-footer">Payments are processed by the payment provider. Keep your deposit reference until confirmed. Do not share passwords or verification codes with anyone.</p>
 </main>
-<script src="js/config.js"></script><script src="js/public-pay.js"></script>
+<script src="js/config.js"></script><script src="js/public-pay.js?v=fee-summary-20261123"></script>
 </body></html>

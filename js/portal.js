@@ -107,6 +107,23 @@ async function renderAdminHome(){
   <section class="card card-pad" style="margin-top:18px"><div class="section-title" style="margin-bottom:14px">Recent transactions</div>${txTable(d.recent,true)}</section>`;
 }
 
+// The server's deposit fee precedence: account override first, method fallback.
+// This is the fee deducted from the account balance credit, not the separate
+// BytePayout merchant processing fee.
+function depositEffectiveFeeBps(method) {
+  const accountFee = Number(me?.depositFeeBps);
+  return Number.isFinite(accountFee) && accountFee > 0
+    ? accountFee
+    : (Number(method?.feeBps) || 0);
+}
+function depositFeeRateLabel(method) {
+  const percent = depositEffectiveFeeBps(method) / 100;
+  return `${percent.toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
+}
+function depositFeeCents(amount, feeBps) {
+  // Match the backend's positive-money ROUND_HALF_UP to USD cents.
+  return Math.round((amount * feeBps / 10000 + Number.EPSILON) * 100);
+}
 const DEPOSIT_PRESETS = [10,20,30,40,50,100,200,500,1000];
 function depositAmountForPreset(method, nominal) {
   const allowed = method?.allowedAmounts || [];
@@ -158,29 +175,34 @@ async function renderDeposit(){
   content.innerHTML=`${pageHead('Add funds','Generate a BytePayout deposit link and track its confirmation.')}
   ${['AGENT','USER'].includes(me.role) ? `<section id="publicSharePanel" class="card card-pad public-link-panel" style="margin-bottom:16px"><div class="label">YOUR PUBLIC DEPOSIT LINK</div><div class="small muted" style="margin:7px 0">Loading your shareable link…</div></section>` : ''}
   <div class="soft-hero" style="margin-bottom:14px"><div class="tiny muted" style="font-weight:900">STEP 1 · CREATE PAYMENT</div><h2 style="margin:8px 0 0">Choose method & amount</h2></div>
-  <div class="grid2"><section class="card card-pad"><div class="label" style="margin-bottom:11px">PAYMENT METHOD</div><div id="methodGrid" class="method-grid">${methodsCache.map((x,i)=>`<button class="method-card ${i===0?'active':''}" data-method="${x.code}"><strong>${escapeHtml(x.label)}</strong><span>${(me.depositFeeBps||x.feeBps)/100}% fee</span></button>`).join('')}</div>
+  <div class="grid2"><section class="card card-pad"><div class="label" style="margin-bottom:11px">PAYMENT METHOD</div><div id="methodGrid" class="method-grid">${methodsCache.map((x,i)=>`<button class="method-card ${i===0?'active':''}" data-method="${x.code}"><strong>${escapeHtml(x.label)}</strong><span>${depositFeeRateLabel(x)} fee</span></button>`).join('')}</div>
   <form id="depositForm" class="stack" style="margin-top:18px"><div class="label">QUICK AMOUNTS</div><div class="deposit-amounts" id="depositPresets"></div><label class="field"><span class="label">Other amount (USD)</span><input id="depAmount" class="input" type="number" min="0.01" step="0.01" value="10" required></label><div class="small muted" id="allowedAmountInfo"></div><button id="createDepositBtn" class="btn btn-primary btn-block">Generate payment link</button></form></section>
-  <aside class="card card-pad"><div class="label">LIVE SUMMARY</div><div class="live-summary" style="margin-top:16px"><span>You send</span><strong id="depSend">$10.00</strong><span>Fee</span><span id="depFee">—</span><span>Balance credited</span><span id="depNet" style="color:var(--blue);font-weight:800">—</span><span>Balance now</span><span>${moneyFmt(w.wallet.available)}</span></div></aside></div>
+  <aside class="card card-pad"><div class="label">LIVE SUMMARY</div><div class="live-summary" style="margin-top:16px"><span>You send</span><strong id="depSend">$10.00</strong><span id="depFeeLabel">Account fee</span><span id="depFee">—</span><span>Wallet credited after payment</span><span id="depNet" style="color:var(--blue);font-weight:800">—</span><span>Current balance</span><span>${moneyFmt(w.wallet.available)}</span></div><p class="small muted" style="margin-top:13px;line-height:1.6">The account fee is deducted from the deposit amount. Your balance changes only after the payment is verified.</p></aside></div>
   <div id="depositStatusPanel" style="margin-top:16px"></div>`;
   if (['AGENT','USER'].includes(me.role)) loadPublicDepositLink();
   const methodGrid=content.querySelector('#methodGrid'),amountInput=content.querySelector('#depAmount'),presetRoot=content.querySelector('#depositPresets');
   const form=content.querySelector('#depositForm'),submit=content.querySelector('#createDepositBtn');
   function update(){
     const amt=Number(amountInput.value||0),method=methodsCache.find(x=>x.code===selectedMethod);
-    const fee=amt*(me.depositFeeBps||method?.feeBps||0)/10000;
+    const feeBps=depositEffectiveFeeBps(method);
+    const feeCents=depositFeeCents(amt,feeBps);
+    const grossCents=Math.round((amt + Number.EPSILON)*100);
     content.querySelector('#depSend').textContent=moneyFmt(amt);
-    content.querySelector('#depFee').textContent=moneyFmt(fee);
-    content.querySelector('#depNet').textContent=moneyFmt(Math.max(0,amt-fee));
+    content.querySelector('#depFeeLabel').textContent=`Account fee (${depositFeeRateLabel(method)})`;
+    content.querySelector('#depFee').textContent=moneyFmt(feeCents/100);
+    content.querySelector('#depNet').textContent=moneyFmt(Math.max(0,grossCents-feeCents)/100);
     const valid=method?.allowedAmounts?.includes(amt) && amt>=method.minAmount && amt<=method.maxAmount;
     submit.disabled=!valid;
-    content.querySelector('#allowedAmountInfo').textContent=valid?'Exact supported amount.':'Only exact supported amounts work for this method. Options: '+(method?.allowedAmounts||[]).join(', ')+' USD. $500 and $1,000 are unavailable.';
+    content.querySelector('#allowedAmountInfo').textContent=valid
+      ? `Exact payment amount: ${moneyFmt(amt)}. Your account fee is deducted from the credited balance.`
+      : 'Only exact supported amounts work for this method. Options: '+(method?.allowedAmounts||[]).join(', ')+' USD. $500 and $1,000 are unavailable.';
     presetRoot.querySelectorAll('[data-preset]').forEach(b=>b.classList.toggle('active',Number(b.dataset.value)===amt));
   }
   function refreshPresets(){
     const method=methodsCache.find(x=>x.code===selectedMethod);
     presetRoot.innerHTML=DEPOSIT_PRESETS.map(n=>{
       const actual=depositAmountForPreset(method,n),valid=actual!==null&&actual>=method.minAmount&&actual<=method.maxAmount;
-      return `<button type="button" class="amount-preset" data-preset="${n}" data-value="${actual??''}" ${valid?'':'disabled'}><strong>${moneyFmt(n)}</strong>${valid&&actual!==n?`<span>Charge ${moneyFmt(actual)}</span>`:!valid?'<span>Unavailable</span>':''}</button>`;
+      return `<button type="button" class="amount-preset" data-preset="${n}" data-value="${actual??''}" ${valid?'':'disabled'}><strong>${moneyFmt(n)}</strong>${!valid?'<span>Unavailable</span>':''}</button>`;
     }).join('');
     presetRoot.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{if(b.disabled)return;amountInput.value=b.dataset.value;currentDepositRequest=null;update()});
     update();

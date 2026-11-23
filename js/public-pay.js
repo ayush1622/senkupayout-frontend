@@ -46,15 +46,16 @@
   }
   function update() {
     const n=Number($('publicAmount').value||0),m=selectedMethod(),feeBps=m?.feeBps || 0;
-    // Use the same round-half-up behavior as the server for positive USD amounts.
-    const fee=Math.round((n*feeBps/10000 + Number.EPSILON)*100)/100;
+    const grossCents=Math.round((n + Number.EPSILON)*100);
+    const feeCents=Math.round((n*feeBps/10000 + Number.EPSILON)*100);
     $('publicGross').textContent=fmt(n);
-    $('publicFee').textContent=fmt(fee);
-    $('publicNet').textContent=fmt(Math.max(0, n-fee));
+    $('publicFee').textContent=fmt(feeCents/100);
+    $('publicNet').textContent=fmt(Math.max(0, grossCents-feeCents)/100);
+    $('publicFeeLabel').textContent=`Account fee (${feeRateText(m)})`;
     $('publicCreate').disabled=!validAmount();
     // Explain the real provider checkout amount separately from the recipient fee.
     $('publicAllowed').textContent=validAmount()
-      ? `Exact checkout amount: ${fmt(n)}. ${feeRateText(m)} fee is deducted from the recipient's wallet credit.`
+      ? `Exact payment amount: ${fmt(n)}. Account fee is deducted from the recipient's wallet credit.`
       : `Only exact supported amounts work. Options: ${(m?.allowedAmounts||[]).map(fmt).join(', ') || 'None'}. $500 and $1,000 are not supported.`;
     $('publicPresets').querySelectorAll('[data-amount]').forEach(b=>b.classList.toggle('active',Number(b.dataset.amount)===n));
   }
@@ -62,9 +63,9 @@
     const m=selectedMethod();
     $('publicPresets').innerHTML=presets.map(n=>{
       const actual=presetAmount(m,n),valid=actual!==null&&actual>=m.minAmount&&actual<=m.maxAmount;
-      // Show the account's admin-set fee rather than "Charge $199.99", which
-      // could incorrectly suggest that the provider's exact amount is a fee.
-      return `<button type="button" class="amount-preset" data-amount="${actual ?? ''}" ${valid?'':'disabled'}><strong>${fmt(n)}</strong><span>${valid ? `${feeRateText(m)} fee` : 'Unavailable'}</span></button>`;
+      // Quick amount cards intentionally show NO fee or checkout-charge label.
+      // The selected payment's exact allowed amount is still sent to BytePayout.
+      return `<button type="button" class="amount-preset" data-amount="${actual ?? ''}" ${valid?'':'disabled'}><strong>${fmt(n)}</strong>${!valid?'<span>Unavailable</span>':''}</button>`;
     }).join('');
     $('publicPresets').querySelectorAll('[data-amount]').forEach(b=>b.onclick=()=>{
       if(!b.disabled) {$('publicAmount').value=b.dataset.amount;currentRequest=null;sessionStorage.removeItem(requestKey);update();}
@@ -80,7 +81,7 @@
     renderPresets();
   }
   function renderMethods() {
-    $('publicMethods').innerHTML=methods.map(m=>`<button type="button" data-method="${escape(m.code)}" class="method-card"><strong>${escape(m.label)}</strong><span>${(m.feeBps/100).toFixed(2)}% account fee</span></button>`).join('');
+    $('publicMethods').innerHTML=methods.map(m=>`<button type="button" data-method="${escape(m.code)}" class="method-card"><strong>${escape(m.label)}</strong><span>${feeRateText(m)} fee</span></button>`).join('');
     $('publicMethods').querySelectorAll('[data-method]').forEach(b=>b.onclick=()=>chooseMethod(b.dataset.method));
     if(methods.length) chooseMethod(methods[0].code);
     $('publicFormArea').classList.remove('hidden');
