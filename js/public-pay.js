@@ -29,6 +29,10 @@
   function errorMessage(message) { $('publicError').textContent=message; $('publicError').classList.remove('hidden'); }
   function clearError() { $('publicError').classList.add('hidden'); }
   function selectedMethod() {return methods.find(x=>x.code===selected)}
+  function feeRateText(method) {
+    const percent = Number(method?.feeBps || 0) / 100;
+    return `${percent.toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
+  }
   function presetAmount(method,nominal) {
     const arr = method?.allowedAmounts || [];
     if(arr.includes(nominal)) return nominal;
@@ -48,15 +52,19 @@
     $('publicFee').textContent=fmt(fee);
     $('publicNet').textContent=fmt(Math.max(0, n-fee));
     $('publicCreate').disabled=!validAmount();
-    $('publicAllowed').textContent=validAmount()?'This amount is supported for the selected method.':
-      `Only exact supported amounts work. Options: ${(m?.allowedAmounts||[]).map(fmt).join(', ') || 'None'}. $500 and $1,000 are not supported.`;
+    // Explain the real provider checkout amount separately from the recipient fee.
+    $('publicAllowed').textContent=validAmount()
+      ? `Exact checkout amount: ${fmt(n)}. ${feeRateText(m)} fee is deducted from the recipient's wallet credit.`
+      : `Only exact supported amounts work. Options: ${(m?.allowedAmounts||[]).map(fmt).join(', ') || 'None'}. $500 and $1,000 are not supported.`;
     $('publicPresets').querySelectorAll('[data-amount]').forEach(b=>b.classList.toggle('active',Number(b.dataset.amount)===n));
   }
   function renderPresets() {
     const m=selectedMethod();
     $('publicPresets').innerHTML=presets.map(n=>{
       const actual=presetAmount(m,n),valid=actual!==null&&actual>=m.minAmount&&actual<=m.maxAmount;
-      return `<button type="button" class="amount-preset" data-amount="${actual ?? ''}" ${valid?'':'disabled'}><strong>${fmt(n)}</strong><span>${!valid?'Unavailable':actual!==n?`Charge ${fmt(actual)}`:'Available'}</span></button>`;
+      // Show the account's admin-set fee rather than "Charge $199.99", which
+      // could incorrectly suggest that the provider's exact amount is a fee.
+      return `<button type="button" class="amount-preset" data-amount="${actual ?? ''}" ${valid?'':'disabled'}><strong>${fmt(n)}</strong><span>${valid ? `${feeRateText(m)} fee` : 'Unavailable'}</span></button>`;
     }).join('');
     $('publicPresets').querySelectorAll('[data-amount]').forEach(b=>b.onclick=()=>{
       if(!b.disabled) {$('publicAmount').value=b.dataset.amount;currentRequest=null;sessionStorage.removeItem(requestKey);update();}
