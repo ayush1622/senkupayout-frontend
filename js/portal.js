@@ -156,11 +156,13 @@ async function renderDeposit(){
   const [m,w]=await Promise.all([api('/api/finance/methods'),api('/api/finance/wallet')]);
   methodsCache=m.methods;selectedMethod=methodsCache[0]?.code||null;
   content.innerHTML=`${pageHead('Add funds','Generate a BytePayout deposit link and track its confirmation.')}
+  ${['AGENT','USER'].includes(me.role) ? `<section id="publicSharePanel" class="card card-pad public-link-panel" style="margin-bottom:16px"><div class="label">YOUR PUBLIC DEPOSIT LINK</div><div class="small muted" style="margin:7px 0">Loading your shareable link…</div></section>` : ''}
   <div class="soft-hero" style="margin-bottom:14px"><div class="tiny muted" style="font-weight:900">STEP 1 · CREATE PAYMENT</div><h2 style="margin:8px 0 0">Choose method & amount</h2></div>
   <div class="grid2"><section class="card card-pad"><div class="label" style="margin-bottom:11px">PAYMENT METHOD</div><div id="methodGrid" class="method-grid">${methodsCache.map((x,i)=>`<button class="method-card ${i===0?'active':''}" data-method="${x.code}"><strong>${escapeHtml(x.label)}</strong><span>${(me.depositFeeBps||x.feeBps)/100}% fee</span></button>`).join('')}</div>
   <form id="depositForm" class="stack" style="margin-top:18px"><div class="label">QUICK AMOUNTS</div><div class="deposit-amounts" id="depositPresets"></div><label class="field"><span class="label">Other amount (USD)</span><input id="depAmount" class="input" type="number" min="0.01" step="0.01" value="10" required></label><div class="small muted" id="allowedAmountInfo"></div><button id="createDepositBtn" class="btn btn-primary btn-block">Generate payment link</button></form></section>
   <aside class="card card-pad"><div class="label">LIVE SUMMARY</div><div class="live-summary" style="margin-top:16px"><span>You send</span><strong id="depSend">$10.00</strong><span>Fee</span><span id="depFee">—</span><span>Balance credited</span><span id="depNet" style="color:var(--blue);font-weight:800">—</span><span>Balance now</span><span>${moneyFmt(w.wallet.available)}</span></div></aside></div>
   <div id="depositStatusPanel" style="margin-top:16px"></div>`;
+  if (['AGENT','USER'].includes(me.role)) loadPublicDepositLink();
   const methodGrid=content.querySelector('#methodGrid'),amountInput=content.querySelector('#depAmount'),presetRoot=content.querySelector('#depositPresets');
   const form=content.querySelector('#depositForm'),submit=content.querySelector('#createDepositBtn');
   function update(){
@@ -205,6 +207,37 @@ async function renderDeposit(){
     beginDepositTracking({transaction:{reference:savedRef,status:'PENDING',method:'',amount:0}});
     trackDeposit(savedRef);
   }
+}
+
+// The public checkout URL is owned by the authenticated account, not the browser.
+// Dashboard does not expose account IDs or BytePayout credentials to visitors.
+async function loadPublicDepositLink() {
+  const panel=document.getElementById('publicSharePanel');
+  if(!panel) return;
+  try{
+    const result=await api('/api/public/links/me');
+    if(!document.getElementById('publicSharePanel'))return;
+    panel.innerHTML=`<div class="label">YOUR PUBLIC DEPOSIT LINK</div>
+      <h3 style="margin:8px 0 3px;font-size:18px">Accept payments without customer login</h3>
+      <p class="small muted" style="margin:5px 0 16px">Share this link with a customer. Payments are created under your account and appear in your transactions after provider verification.</p>
+      <div class="public-link-row"><input class="input" readonly value="${escapeHtml(result.url)}" id="publicLinkField" aria-label="Your public payment link"><button class="btn btn-primary" type="button" id="copyPublicLink">Copy link</button><a class="btn btn-outline" target="_blank" rel="noopener noreferrer" href="${escapeHtml(result.url)}">Open ↗</a></div>
+      <div class="public-link-tools"><span class="small" style="color:${result.enabled?'var(--good)':'var(--bad)'}">${result.enabled?'● Link active':'● Link paused'}</span>
+      <button class="btn btn-outline btn-sm" type="button" id="togglePublicLink">${result.enabled?'Pause link':'Enable link'}</button>
+      <button class="btn btn-outline btn-sm" type="button" id="rotatePublicLink">Replace link</button></div>`;
+    panel.querySelector('#copyPublicLink').onclick=async()=>{
+      try { await navigator.clipboard.writeText(result.url); toast('Public deposit link copied.'); }
+      catch { const input=panel.querySelector('#publicLinkField');input.select();toast('Select and copy the link.'); }
+    };
+    panel.querySelector('#togglePublicLink').onclick=async()=>{
+      try{await api('/api/public/links/me/toggle',{method:'POST',body:{enabled:!result.enabled}});toast(result.enabled?'Link paused.':'Link enabled.');loadPublicDepositLink();}
+      catch(e){toast(e.message,true)}
+    };
+    panel.querySelector('#rotatePublicLink').onclick=async()=>{
+      if(!confirm('Replace this public link? Your old share link will stop working, but existing deposits will continue to be tracked.'))return;
+      try{await api('/api/public/links/me/rotate',{method:'POST'});toast('Your public link has been replaced.');loadPublicDepositLink();}
+      catch(e){toast(e.message,true)}
+    };
+  }catch(e){panel.innerHTML=`<div class="notice bad">Public link unavailable: ${escapeHtml(e.message)}</div>`}
 }
 
 // Only AGENT accounts have these views; the backend enforces that too.

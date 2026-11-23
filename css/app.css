@@ -80,3 +80,8 @@ a{text-decoration:none;color:inherit}button,input,select,textarea{font:inherit}b
 
 /* BytePayout deposit amounts & status — preserved SenkuPayout theme */
 .deposit-amounts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.amount-preset{background:var(--card,#fff);border:1px solid var(--border,#d6e1ec);border-radius:12px;padding:11px 5px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;color:inherit;cursor:pointer;min-height:64px}.amount-preset strong{font-size:14px}.amount-preset span{font-size:10px;opacity:.72}.amount-preset.active{border-color:var(--blue,#348eff);box-shadow:0 0 0 2px rgba(48,142,255,.15)}.amount-preset:disabled{opacity:.42;cursor:not-allowed}.payment-tracker{border-color:var(--blue,#348eff)}.payment-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:16px 0}.payment-actions .notice{width:100%;overflow-wrap:anywhere}@media(max-width:440px){.deposit-amounts{grid-template-columns:repeat(3,minmax(0,1fr))}.payment-actions>a,.payment-actions>button{width:100%;text-align:center}}
+
+/* Shareable checkout panel in account deposit screen */
+.public-link-panel{border-color:#bcd9ff;background:linear-gradient(120deg,#eff6ff,#fff)}
+.public-link-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.public-link-row .input{flex:1;min-width:190px}.public-link-tools{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:12px}.public-link-tools .small{margin-right:auto}
+@media(max-width:560px){.public-link-row .input{flex-basis:100%}.public-link-row .btn{flex:1}}

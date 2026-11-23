@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow"><title>Secure Deposit · SenkuPayout</title>
+<link rel="stylesheet" href="css/app.css"><link rel="stylesheet" href="css/public-pay.css"></head>
+<body class="public-pay-page">
+<header class="public-topbar"><a class="brand" href="index.html"><span class="brand-mark"></span><span>SenkuPayout</span></a><span class="small muted">Payment link</span></header>
+<main class="public-pay-wrap">
+ <section class="public-head"><div class="public-eyebrow">PAY WITH SENKUPAYOUT</div>
+  <h1 id="publicTitle">Secure deposit</h1><p id="publicSubtitle">Choose a method and an exact amount. No account or login required.</p></section>
+ <div id="publicError" class="notice bad hidden" role="alert"></div>
+ <div id="publicFormArea" class="public-checkout-grid hidden">
+  <div class="public-form-col"><div class="card card-pad"><div class="label">PAYMENT METHOD</div><div id="publicMethods" class="method-grid public-methods" style="margin-top:12px"></div>
+  </div><section class="card card-pad"><div class="label">DEPOSIT AMOUNT</div>
+   <div id="publicPresets" class="deposit-amounts" style="margin-top:13px"></div>
+   <label class="field" style="margin-top:17px"><span class="label">Other supported amount (USD)</span><input type="number" class="input" min="0.01" step="0.01" id="publicAmount" placeholder="Select an amount" autocomplete="off" inputmode="decimal"></label>
+   <p id="publicAllowed" class="small muted" aria-live="polite"></p>
+   <button id="publicCreate" type="button" class="btn btn-primary btn-block" disabled>Generate payment link</button>
+   <div class="small muted" style="margin-top:12px">Checkout is handled by the payment provider. Payment is confirmed only after the provider verifies it.</div>
+  </section></div>
+  <aside class="public-side-col"><div class="card card-pad public-summary"><div class="label">LIVE SUMMARY</div><div class="public-summary-row"><span>You send</span><strong id="publicGross">$0.00</strong></div>
+   <div class="public-summary-row"><span>Recipient account fee</span><span id="publicFee">—</span></div>
+   <div class="public-summary-row total"><span>Recipient wallet receives</span><strong id="publicNet">$0.00</strong></div>
+   <p class="tiny muted">Fees displayed are deducted from the recipient's account credit. Your checkout amount is shown above.</p></div>
+   <div class="card card-pad" style="margin-top:14px"><div class="label">HOW IT WORKS</div>
+   <p class="small muted">1. Choose a method and amount.</p><p class="small muted">2. Open your generated checkout link.</p><p class="small muted">3. We verify the payment and update the recipient's account.</p></div></aside>
+ </div>
+ <section id="publicTracking" class="hidden" aria-live="polite"></section>
+ <p class="public-footer">Payments are processed by the payment provider. Keep your deposit reference until confirmed. Do not share passwords or verification codes with anyone.</p>
+</main>
+<script src="js/config.js"></script><script src="js/public-pay.js"></script>
+</body></html>
